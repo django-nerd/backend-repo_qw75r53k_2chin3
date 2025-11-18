@@ -1,48 +1,144 @@
 """
-Database Schemas
+Database Schemas for Beauty & Wellness Growth OS
 
-Define your MongoDB collection schemas here using Pydantic models.
-These schemas are used for data validation in your application.
-
-Each Pydantic model represents a collection in your database.
-Model name is converted to lowercase for the collection name:
-- User -> "user" collection
-- Product -> "product" collection
-- BlogPost -> "blogs" collection
+Each Pydantic model corresponds to a MongoDB collection (lowercased class name).
+These models are used for validation on create/read endpoints and for the
+Flames DB viewer via the /schema endpoint.
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, Field, EmailStr
+from typing import Optional, List, Literal
+from datetime import datetime
 
-# Example schemas (replace with your own):
+# Core accounts ---------------------------------------------------------------
+
+class Salon(BaseModel):
+    name: str = Field(..., description="Salon/Brand name")
+    phone: str = Field(..., description="Primary business phone (E.164 or local)")
+    city: Optional[str] = Field(None, description="City name")
+    address: Optional[str] = Field(None, description="Street address")
+    country: str = Field("IN", description="Country code (ISO2)")
+    plan: Literal["trial", "starter", "pro", "enterprise"] = Field(
+        "trial", description="Current subscription plan"
+    )
+    onboarding_done: bool = Field(False, description="Whether onboarding is complete")
 
 class User(BaseModel):
-    """
-    Users collection schema
-    Collection name: "user" (lowercase of class name)
-    """
-    name: str = Field(..., description="Full name")
-    email: str = Field(..., description="Email address")
-    address: str = Field(..., description="Address")
-    age: Optional[int] = Field(None, ge=0, le=120, description="Age in years")
-    is_active: bool = Field(True, description="Whether user is active")
+    role: Literal["owner", "manager", "staff"] = Field("owner", description="Role in the salon")
+    name: str
+    email: Optional[EmailStr] = None
+    phone: str
+    salon_id: Optional[str] = Field(None, description="Reference to salon _id as string")
+    is_active: bool = True
 
-class Product(BaseModel):
-    """
-    Products collection schema
-    Collection name: "product" (lowercase of class name)
-    """
-    title: str = Field(..., description="Product title")
-    description: Optional[str] = Field(None, description="Product description")
-    price: float = Field(..., ge=0, description="Price in dollars")
-    category: str = Field(..., description="Product category")
-    in_stock: bool = Field(True, description="Whether product is in stock")
+# CRM ------------------------------------------------------------------------
 
-# Add your own schemas here:
-# --------------------------------------------------
+class Client(BaseModel):
+    salon_id: str
+    name: str
+    phone: Optional[str] = None
+    email: Optional[EmailStr] = None
+    tags: List[str] = []
+    notes: Optional[str] = None
+    last_visit: Optional[datetime] = None
+    source: Optional[str] = Field(None, description="Acquisition source (walk-in, Instagram, etc.)")
 
-# Note: The Flames database viewer will automatically:
-# 1. Read these schemas from GET /schema endpoint
-# 2. Use them for document validation when creating/editing
-# 3. Handle all database operations (CRUD) directly
-# 4. You don't need to create any database endpoints!
+class Service(BaseModel):
+    salon_id: str
+    name: str
+    category: Optional[str] = None
+    duration_min: int = Field(..., ge=5, le=600)
+    price: float = Field(..., ge=0)
+
+# Bookings -------------------------------------------------------------------
+
+class Booking(BaseModel):
+    salon_id: str
+    client_id: Optional[str] = None
+    services: List[str] = Field(default_factory=list, description="List of service names or ids")
+    staff_id: Optional[str] = None
+    start_time: datetime
+    end_time: datetime
+    status: Literal["pending", "confirmed", "completed", "cancelled", "no_show"] = "pending"
+    notes: Optional[str] = None
+    amount: float = 0.0
+    payment_status: Literal["unpaid", "paid", "partial", "refunded"] = "unpaid"
+
+# Inventory ------------------------------------------------------------------
+
+class InventoryItem(BaseModel):
+    salon_id: str
+    sku: Optional[str] = None
+    name: str
+    brand: Optional[str] = None
+    quantity: float = 0
+    unit: Literal["pcs", "ml", "g"] = "pcs"
+    low_stock_threshold: Optional[float] = 0
+    cost_price: Optional[float] = 0
+    sale_price: Optional[float] = 0
+
+# Payroll --------------------------------------------------------------------
+
+class Staff(BaseModel):
+    salon_id: str
+    name: str
+    phone: Optional[str] = None
+    role: Optional[str] = None
+    commission_pct: Optional[float] = Field(0, ge=0, le=100)
+
+class PayrollEntry(BaseModel):
+    salon_id: str
+    staff_id: str
+    month: str = Field(..., description="YYYY-MM")
+    base_salary: float = 0
+    commissions: float = 0
+    bonuses: float = 0
+    deductions: float = 0
+    payout_status: Literal["pending", "processing", "paid"] = "pending"
+
+# Billing / Subscriptions -----------------------------------------------------
+
+class Subscription(BaseModel):
+    salon_id: str
+    plan: Literal["trial", "starter", "pro", "enterprise"] = "trial"
+    status: Literal["trial", "active", "past_due", "canceled"] = "trial"
+    start_date: datetime
+    end_date: Optional[datetime] = None
+    mrr: float = 0
+
+class Transaction(BaseModel):
+    salon_id: str
+    amount: float
+    currency: Literal["INR"] = "INR"
+    purpose: Literal["subscription", "addon", "pos"] = "subscription"
+    status: Literal["pending", "succeeded", "failed", "refunded"] = "succeeded"
+    timestamp: datetime
+
+# Auth / OTP -----------------------------------------------------------------
+
+class OTP(BaseModel):
+    phone: str
+    code: str
+    expires_at: datetime
+    used: bool = False
+
+class VerificationToken(BaseModel):
+    phone: str
+    token: str
+    expires_at: datetime
+
+class Session(BaseModel):
+    user_id: str
+    salon_id: Optional[str] = None
+    token: str
+    expires_at: datetime
+
+# Analytics snapshot ----------------------------------------------------------
+
+class AnalyticsSnapshot(BaseModel):
+    salon_id: Optional[str] = None
+    period: Literal["7d", "30d", "90d", "mtd"] = "30d"
+    total_revenue: float = 0
+    total_bookings: int = 0
+    new_clients: int = 0
+    returning_clients: int = 0
